@@ -154,7 +154,23 @@ if (!window.__SINGLE_SPA_DEVTOOLS__) {
 
 // Dispatch event when single-spa routing happens
 // This will be caught by the isolated content script
-window.addEventListener("single-spa:routing-event", () => {
-  window.dispatchEvent(new CustomEvent("single-spa-inspector-pro:routing-event"));
+function dispatchStatusRefresh(reason) {
+  // reason 可用于后续扩展或调试
+  window.dispatchEvent(
+    new CustomEvent("single-spa-inspector-pro:routing-event", {
+      detail: { reason },
+    })
+  );
+}
+
+// 触发时机更多，避免网络慢或切换路由时状态滞后
+[
+  "single-spa:routing-event",
+  "single-spa:before-routing-event",
+  "single-spa:app-change",
+  "single-spa:app-change-error",
+  "single-spa:no-app-change",
+].forEach((evtName) => {
+  window.addEventListener(evtName, () => dispatchStatusRefresh(evtName));
 });
 
