@@ -198,7 +198,8 @@ export default function Apps(props) {
                       <input
                         className={always("import-override")
                           .maybe("editing", editingApps[app.name])
-                          .maybe("invalid", editingApps[app.name] && !isValidJsUrl(editValues[app.name]))}
+                          .maybe("invalid", editingApps[app.name] && !isValidJsUrl(editValues[app.name]))
+                          .maybe("active", isToggleEnabled(app.name) && hasSavedUrl(app.name))}
                         value={getDisplayUrl(app.name)}
                         readOnly={!editingApps[app.name]}
                         onChange={(e) => {
@@ -525,6 +526,11 @@ body.dark & .app-name {
 & .import-override:focus {
   border-color: var(--blue);
   outline: none;
+}
+
+& .import-override.active {
+  color: var(--green);
+  font-weight: 600;
 }
 
 & .import-override-header {

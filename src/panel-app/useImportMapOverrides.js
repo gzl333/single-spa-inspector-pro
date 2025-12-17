@@ -1,10 +1,88 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { evalCmd, ProtocolError } from "../inspected-window.helper.js";
 import browser from "webextension-polyfill";
+
+// 全局操作版本号，用于识别最新的操作
+let globalOperationVersion = 0;
+
+// 使用 bypassCache 刷新页面，确保加载最新资源
+async function reloadWithBypassCache() {
+  const tabId = browser.devtools.inspectedWindow.tabId;
+  await browser.tabs.reload(tabId, { bypassCache: true });
+}
 
 // 判断是否为可恢复的协议错误（不应导致面板崩溃）
 function isRecoverableProtocolError(err) {
   return err instanceof ProtocolError || err?.isRecoverable === true;
+}
+
+// 等待页面加载完成
+async function waitForPageLoad(maxWaitMs = 30000) {
+  const tabId = browser.devtools.inspectedWindow.tabId;
+  const startTime = Date.now();
+  
+  return new Promise((resolve) => {
+    const checkStatus = async () => {
+      try {
+        const tab = await browser.tabs.get(tabId);
+        if (tab.status === "complete") {
+          resolve(true);
+          return;
+        }
+        
+        // 超时检查
+        if (Date.now() - startTime > maxWaitMs) {
+          console.warn("[single-spa-inspector-pro] Page load timeout, proceeding anyway");
+          resolve(false);
+          return;
+        }
+        
+        // 继续等待
+        setTimeout(checkStatus, 200);
+      } catch (err) {
+        console.warn("[single-spa-inspector-pro] Error checking tab status:", err);
+        resolve(false);
+      }
+    };
+    
+    checkStatus();
+  });
+}
+
+// 延迟函数
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// 等待 importMapOverrides 对象可用
+async function ensureImportMapOverridesReady(maxWaitMs = 5000) {
+  const start = Date.now();
+  while (Date.now() - start <= maxWaitMs) {
+    try {
+      const ready = await evalCmd(`(function() {
+        return !!(window.importMapOverrides && window.importMapOverrides.addOverride && window.importMapOverrides.removeOverride);
+      })()`, { retries: 0 });
+      if (ready) return true;
+    } catch (err) {
+      // 对于协议错误交由上层处理；这里仅作为存在性检查
+      if (!isRecoverableProtocolError(err)) {
+        console.debug("[single-spa-inspector-pro] ensureImportMapOverridesReady non-recoverable:", err?.message || err);
+      }
+    }
+    await delay(200);
+  }
+  return false;
+}
+
+// 判断错误是否由 importMapOverrides 未加载导致
+function isMissingImportMapOverrides(err) {
+  const msg = err?.message || "";
+  return (
+    msg.includes("importMapOverrides") ||
+    msg.includes("addOverride") ||
+    msg.includes("removeOverride") ||
+    msg.includes("Cannot read properties of undefined")
+  );
 }
 
 export default function useImportMapOverrides() {
@@ -16,9 +94,215 @@ export default function useImportMapOverrides() {
   const [isLoading, setIsLoading] = useState(false);
   // 新增：协议错误状态（可恢复，不崩溃）
   const [protocolError, setProtocolError] = useState(null);
+  // 新增：用于跟踪当前操作版本号的 ref
+  const currentOperationRef = useRef(0);
+  // 新增：是否正在进行验证刷新，避免无限循环
+  const isVerifyingRef = useRef(false);
+  // 新增：是否正在从已保存配置中应用到页面，避免重复触发
+  const isApplyingSavedRef = useRef(false);
 
   if (appError) {
     throw appError;
+  }
+
+  // ========== 新增：验证和同步方法 ==========
+
+  // 获取页面上当前的 override 状态
+  async function getPageOverrideState(appName) {
+    try {
+      const result = await evalCmd(`(function() {
+        if (!window.importMapOverrides) return null;
+        const overrides = window.importMapOverrides.getOverrideMap();
+        return overrides.imports["${appName}"] || null;
+      })()`);
+      return result;
+    } catch (err) {
+      console.warn("[single-spa-inspector-pro] Error getting page override state:", err);
+      return null;
+    }
+  }
+
+  // 获取页面上完整的 override map
+  async function getCurrentOverrideMap() {
+    try {
+      const result = await evalCmd(`(function() {
+        if (!window.importMapOverrides) return null;
+        const overrides = window.importMapOverrides.getOverrideMap();
+        return overrides.imports || {};
+      })()`);
+      return result;
+    } catch (err) {
+      console.warn("[single-spa-inspector-pro] Error getting current override map:", err);
+      return null;
+    }
+  }
+
+  // 确保页面上的 import map 与保存的状态一致（用于页面刷新/重新进入）
+  async function ensureSavedOverridesApplied(reason = "unknown", overridesMap = savedOverrides) {
+    if (!importMapsEnabled) {
+      return;
+    }
+    const effectiveOverrides = overridesMap || {};
+    if (Object.keys(effectiveOverrides).length === 0) {
+      return;
+    }
+    if (isApplyingSavedRef.current) {
+      console.debug("[single-spa-inspector-pro] Skipping ensureSavedOverridesApplied - already running");
+      return;
+    }
+
+    let needsRetry = false;
+    isApplyingSavedRef.current = true;
+    try {
+      await waitForPageLoad();
+
+      const ready = await ensureImportMapOverridesReady();
+      if (!ready) {
+        console.debug("[single-spa-inspector-pro] importMapOverrides not ready, schedule retry ensureSavedOverridesApplied");
+        needsRetry = true;
+        return;
+      }
+
+      const pageMap = await getCurrentOverrideMap();
+      if (pageMap === null) {
+        console.debug("[single-spa-inspector-pro] importMapOverrides not ready, skip ensure step");
+        needsRetry = true;
+        return;
+      }
+
+      let changed = false;
+
+      // 遍历保存的配置，确保页面状态一致
+      for (const [appName, saved] of Object.entries(effectiveOverrides)) {
+        const expectedUrl = saved?.url;
+        const expectedEnabled = saved?.enabled && !!expectedUrl;
+        const pageUrl = pageMap[appName];
+
+        if (expectedEnabled) {
+          if (pageUrl !== expectedUrl) {
+            console.debug(`[single-spa-inspector-pro] Applying saved override for ${appName} (reason=${reason})`);
+            const ok = await addOverride(appName, expectedUrl);
+            changed = changed || ok;
+            if (!ok) needsRetry = true;
+          }
+        } else {
+          if (pageUrl) {
+            console.debug(`[single-spa-inspector-pro] Removing stale override for ${appName} (reason=${reason})`);
+            const ok = await removeOverride(appName);
+            changed = changed || ok;
+            if (!ok) needsRetry = true;
+          }
+        }
+      }
+
+      // 如果页面上有额外的 override 但未在 savedOverrides 中，也移除以保持一致
+      for (const pageAppName of Object.keys(pageMap)) {
+        if (!effectiveOverrides[pageAppName]) {
+          console.debug(`[single-spa-inspector-pro] Removing extra override ${pageAppName} not in savedOverrides (reason=${reason})`);
+          const ok = await removeOverride(pageAppName);
+          changed = changed || ok;
+          if (!ok) needsRetry = true;
+        }
+      }
+
+      if (changed) {
+        await reloadWithBypassCache();
+      }
+    } catch (err) {
+      console.warn("[single-spa-inspector-pro] Error ensuring saved overrides applied:", err);
+    } finally {
+      isApplyingSavedRef.current = false;
+    }
+
+    // 需要重试时安排一次延时重试
+    if (needsRetry && importMapsEnabled && Object.keys(effectiveOverrides).length > 0) {
+      setTimeout(() => {
+        ensureSavedOverridesApplied(`${reason}-retry`, effectiveOverrides);
+      }, 500);
+    }
+  }
+
+  // 验证页面状态是否与期望状态一致
+  async function verifyAndSyncState(appName, expectedEnabled, expectedUrl, operationVersion) {
+    // 如果不是最新操作，跳过验证
+    if (operationVersion !== currentOperationRef.current) {
+      console.debug(`[single-spa-inspector-pro] Skipping verification for outdated operation (v${operationVersion}, current: v${currentOperationRef.current})`);
+      return;
+    }
+
+    // 避免验证时的无限循环
+    if (isVerifyingRef.current) {
+      console.debug("[single-spa-inspector-pro] Skipping verification - already verifying");
+      return;
+    }
+
+    try {
+      isVerifyingRef.current = true;
+      
+      // 等待页面加载完成
+      await waitForPageLoad();
+      
+      // 再次检查是否仍是最新操作
+      if (operationVersion !== currentOperationRef.current) {
+        console.debug(`[single-spa-inspector-pro] Operation outdated after page load (v${operationVersion}, current: v${currentOperationRef.current})`);
+        return;
+      }
+
+      // 等待一小段时间让 importMapOverrides 初始化
+      await delay(500);
+
+      // 获取页面上的实际状态
+      const pageOverrideUrl = await getPageOverrideState(appName);
+      
+      // 判断页面状态是否正确
+      const pageHasOverride = !!pageOverrideUrl;
+      const shouldHaveOverride = expectedEnabled && !!expectedUrl;
+
+      console.debug(`[single-spa-inspector-pro] Verifying state for ${appName}:`, {
+        pageHasOverride,
+        pageOverrideUrl,
+        shouldHaveOverride,
+        expectedEnabled,
+        expectedUrl,
+        operationVersion
+      });
+
+      // 如果状态不一致，需要修复
+      if (pageHasOverride !== shouldHaveOverride) {
+        console.warn(`[single-spa-inspector-pro] State mismatch detected for ${appName}! Page: ${pageHasOverride}, Expected: ${shouldHaveOverride}. Resyncing...`);
+        
+        // 再次检查是否仍是最新操作
+        if (operationVersion !== currentOperationRef.current) {
+          console.debug("[single-spa-inspector-pro] Operation outdated, skipping resync");
+          return;
+        }
+
+        // 重新应用正确的状态
+        let ok = true;
+        if (shouldHaveOverride) {
+          ok = await addOverride(appName, expectedUrl);
+        } else {
+          ok = await removeOverride(appName);
+        }
+
+        if (ok) {
+          // 再次刷新页面
+          await reloadWithBypassCache();
+        } else {
+          // 如果仍未就绪，稍后再补偿
+          setTimeout(() => {
+            ensureSavedOverridesApplied("verify-retry");
+          }, 400);
+        }
+        
+        // 递归验证，但只验证一次（通过 isVerifyingRef 控制）
+        // 注意：这里不再递归验证，因为我们已经设置了 isVerifyingRef
+      }
+    } catch (err) {
+      console.warn("[single-spa-inspector-pro] Error during state verification:", err);
+    } finally {
+      isVerifyingRef.current = false;
+    }
   }
 
   // ========== 原有方法 ==========
@@ -63,23 +347,45 @@ export default function useImportMapOverrides() {
 
   async function addOverride(currentMap, currentUrl) {
     try {
+      const ready = await ensureImportMapOverridesReady();
+      if (!ready) {
+        console.warn("[single-spa-inspector-pro] addOverride skipped because importMapOverrides not ready");
+        return false;
+      }
       await evalCmd(`(function() {
         return window.importMapOverrides.addOverride("${currentMap}", "${currentUrl}")
       })()`);
+      return true;
     } catch (err) {
+      if (isMissingImportMapOverrides(err)) {
+        console.warn("[single-spa-inspector-pro] addOverride failed because importMapOverrides missing (will retry later)");
+        return false;
+      }
       err.message = `Error during addOverride. ${err.message}`;
       setAppError(err);
+      return false;
     }
   }
 
   async function removeOverride(currentMap) {
     try {
+      const ready = await ensureImportMapOverridesReady();
+      if (!ready) {
+        console.warn("[single-spa-inspector-pro] removeOverride skipped because importMapOverrides not ready");
+        return false;
+      }
       await evalCmd(`(function() {
         return window.importMapOverrides.removeOverride("${currentMap}")
       })()`);
+      return true;
     } catch (err) {
+      if (isMissingImportMapOverrides(err)) {
+        console.warn("[single-spa-inspector-pro] removeOverride failed because importMapOverrides missing (will retry later)");
+        return false;
+      }
       err.message = `Error during removeOverride. ${err.message}`;
       setAppError(err);
+      return false;
     }
   }
 
@@ -89,7 +395,7 @@ export default function useImportMapOverrides() {
         !url ? removeOverride(map) : addOverride(map, url)
       );
       await Promise.all(overrideCalls);
-      await evalCmd(`window.location.reload()`);
+      await reloadWithBypassCache();
     } catch (err) {
       err.message = `Error during batchSetOverrides. ${err.message}`;
       setAppError(err);
@@ -117,6 +423,13 @@ export default function useImportMapOverrides() {
   // 保存单个 override 到 storage，并应用到页面
   const saveOverride = useCallback(async (appName, url) => {
     try {
+      // 递增全局操作版本号
+      globalOperationVersion++;
+      const thisOperationVersion = globalOperationVersion;
+      currentOperationRef.current = thisOperationVersion;
+      
+      console.debug(`[single-spa-inspector-pro] Save override for ${appName}: url=${url}, version=${thisOperationVersion}`);
+
       const newSavedOverrides = {
         ...savedOverrides,
         [appName]: { url, enabled: true }
@@ -124,9 +437,34 @@ export default function useImportMapOverrides() {
       await browser.storage.local.set({ savedOverrides: newSavedOverrides });
       setSavedOverrides(newSavedOverrides);
       
+      // 检查这是否仍是最新操作
+      if (thisOperationVersion !== currentOperationRef.current) {
+        console.debug(`[single-spa-inspector-pro] Operation ${thisOperationVersion} superseded, skipping page update`);
+        return;
+      }
+
       // 应用到页面
-      await addOverride(appName, url);
-      await evalCmd(`window.location.reload()`);
+      const ok = await addOverride(appName, url);
+      if (!ok) {
+        // importMapOverrides 尚未就绪，稍后再补偿
+        setTimeout(() => {
+          ensureSavedOverridesApplied("save-retry", newSavedOverrides);
+        }, 400);
+        return;
+      }
+
+      // 再次检查
+      if (thisOperationVersion !== currentOperationRef.current) {
+        return;
+      }
+
+      // 使用 bypassCache 刷新，确保加载新的 override 资源
+      await reloadWithBypassCache();
+
+      // 页面刷新后验证状态
+      setTimeout(() => {
+        verifyAndSyncState(appName, true, url, thisOperationVersion);
+      }, 100);
     } catch (err) {
       err.message = `Error saving override: ${err.message}`;
       setAppError(err);
@@ -139,6 +477,13 @@ export default function useImportMapOverrides() {
       const saved = savedOverrides[appName];
       if (!saved) return;
 
+      // 递增全局操作版本号，标记这是最新的操作
+      globalOperationVersion++;
+      const thisOperationVersion = globalOperationVersion;
+      currentOperationRef.current = thisOperationVersion;
+      
+      console.debug(`[single-spa-inspector-pro] Toggle override for ${appName}: enabled=${enabled}, version=${thisOperationVersion}`);
+
       // 更新 storage 中的 enabled 状态
       const newSavedOverrides = {
         ...savedOverrides,
@@ -147,13 +492,41 @@ export default function useImportMapOverrides() {
       await browser.storage.local.set({ savedOverrides: newSavedOverrides });
       setSavedOverrides(newSavedOverrides);
 
-      // 应用或移除 override
-      if (enabled) {
-        await addOverride(appName, saved.url);
-      } else {
-        await removeOverride(appName);
+      // 检查这是否仍是最新操作
+      if (thisOperationVersion !== currentOperationRef.current) {
+        console.debug(`[single-spa-inspector-pro] Operation ${thisOperationVersion} superseded by ${currentOperationRef.current}, skipping page update`);
+        return;
       }
-      await evalCmd(`window.location.reload()`);
+
+      // 应用或移除 override
+      let ok = true;
+      if (enabled) {
+        ok = await addOverride(appName, saved.url);
+      } else {
+        ok = await removeOverride(appName);
+      }
+      if (!ok) {
+        setTimeout(() => {
+          ensureSavedOverridesApplied("toggle-retry", newSavedOverrides);
+        }, 400);
+        return;
+      }
+
+      // 再次检查是否仍是最新操作
+      if (thisOperationVersion !== currentOperationRef.current) {
+        console.debug(`[single-spa-inspector-pro] Operation ${thisOperationVersion} superseded before reload, skipping`);
+        return;
+      }
+
+      // 使用 bypassCache 刷新，确保加载正确的资源（override 或原版）
+      await reloadWithBypassCache();
+
+      // 页面刷新后验证状态是否正确
+      // 使用 setTimeout 让刷新先开始，然后异步验证
+      setTimeout(() => {
+        verifyAndSyncState(appName, enabled, saved.url, thisOperationVersion);
+      }, 100);
+      
     } catch (err) {
       err.message = `Error toggling override: ${err.message}`;
       setAppError(err);
@@ -162,42 +535,85 @@ export default function useImportMapOverrides() {
 
   // 清除已保存的 override
   const clearSavedOverride = useCallback(async (appName) => {
+    // 递增全局操作版本号
+    globalOperationVersion++;
+    const thisOperationVersion = globalOperationVersion;
+    currentOperationRef.current = thisOperationVersion;
+    
+    console.debug(`[single-spa-inspector-pro] Clear override for ${appName}, version=${thisOperationVersion}`);
+
     try {
       const newSavedOverrides = { ...savedOverrides };
       delete newSavedOverrides[appName];
       await browser.storage.local.set({ savedOverrides: newSavedOverrides });
       setSavedOverrides(newSavedOverrides);
       
+      // 检查这是否仍是最新操作
+      if (thisOperationVersion !== currentOperationRef.current) {
+        return;
+      }
+
       // 同时移除页面上的 override（忽略错误）
-      try {
-        await removeOverride(appName);
-      } catch (e) {
-        // 忽略移除错误
+      const ok = await removeOverride(appName);
+      if (!ok) {
+        setTimeout(() => {
+          ensureSavedOverridesApplied("clear-saved-retry", newSavedOverrides);
+        }, 400);
       }
     } catch (err) {
       err.message = `Error clearing saved override: ${err.message}`;
       setAppError(err);
     }
     
-    // 无论如何都刷新页面
-    await evalCmd(`window.location.reload()`);
+    // 再次检查
+    if (thisOperationVersion !== currentOperationRef.current) {
+      return;
+    }
+
+    // 无论如何都刷新页面，使用 bypassCache 确保加载原版资源
+    await reloadWithBypassCache();
+
+    // 页面刷新后验证状态
+    setTimeout(() => {
+      verifyAndSyncState(appName, false, null, thisOperationVersion);
+    }, 100);
   }, [savedOverrides]);
 
   // 清除所有已保存的 overrides
   const clearAllOverrides = useCallback(async () => {
+    // 递增全局操作版本号
+    globalOperationVersion++;
+    const thisOperationVersion = globalOperationVersion;
+    currentOperationRef.current = thisOperationVersion;
+    
+    console.debug(`[single-spa-inspector-pro] Clear all overrides, version=${thisOperationVersion}`);
+
     try {
       // 移除页面上所有的 overrides
-      const removePromises = Object.keys(savedOverrides).map(appName => 
-        removeOverride(appName)
+      const removePromises = await Promise.all(
+        Object.keys(savedOverrides).map(appName => removeOverride(appName))
       );
-      await Promise.all(removePromises);
+      const anyRemoveFailed = removePromises.some((ok) => ok === false);
       
+      // 检查这是否仍是最新操作
+      if (thisOperationVersion !== currentOperationRef.current) {
+        return;
+      }
+
       // 清空 storage
       await browser.storage.local.set({ savedOverrides: {} });
       setSavedOverrides({});
       
-      // 刷新页面
-      await evalCmd(`window.location.reload()`);
+      // 使用 bypassCache 刷新页面，确保加载原版资源
+      await reloadWithBypassCache();
+
+      // 对于 clearAll，我们不需要单独验证每个 app，
+      // 但如果需要，可以在这里添加批量验证逻辑
+      if (anyRemoveFailed) {
+        setTimeout(() => {
+          ensureSavedOverridesApplied("clear-all-retry", {});
+        }, 400);
+      }
     } catch (err) {
       err.message = `Error clearing all overrides: ${err.message}`;
       setAppError(err);
@@ -213,7 +629,8 @@ export default function useImportMapOverrides() {
       if (hasImportMapsEnabled) {
         setImportMapEnabled(hasImportMapsEnabled);
         await getImportMapOverrides();
-        await loadSavedOverrides();
+        const saved = await loadSavedOverrides();
+        await ensureSavedOverridesApplied("init", saved);
       }
     }
 
@@ -224,6 +641,19 @@ export default function useImportMapOverrides() {
       setAppError(err);
     }
   }, []);
+
+  // 监听页面加载完成（包括手动刷新）后再校验一次
+  useEffect(() => {
+    const tabId = browser.devtools.inspectedWindow.tabId;
+    const handler = (updatedTabId, changeInfo) => {
+      if (updatedTabId === tabId && changeInfo.status === "complete") {
+        ensureSavedOverridesApplied("tab-updated");
+      }
+    };
+
+    browser.tabs.onUpdated.addListener(handler);
+    return () => browser.tabs.onUpdated.removeListener(handler);
+  }, [importMapsEnabled, savedOverrides]);
 
   // ========== 原有方法 ==========
 
