@@ -45,7 +45,7 @@ function PanelRoot(props) {
     } catch (err) {
       // 对于可恢复的协议错误，不抛出，只记录并等待
       if (isRecoverableProtocolError(err)) {
-        console.warn("[single-spa-inspector] Recoverable error during getApps:", err.message);
+        console.debug("[single-spa-inspector] Recoverable error during getApps:", err.message);
         // 可能是页面导航中，设置导航状态
         if (isMountedRef.current) {
           setIsNavigating(true);
@@ -82,7 +82,7 @@ function PanelRoot(props) {
           return;
         }
       } catch (err) {
-        console.warn(`[single-spa-inspector] Attempt ${i + 1}/${maxRetries} failed:`, err.message);
+        console.debug(`[single-spa-inspector] Attempt ${i + 1}/${maxRetries} failed:`, err.message);
       }
       
       // 等待一段时间再重试
@@ -103,8 +103,12 @@ function PanelRoot(props) {
     function onNavigated(url) {
       console.log("[single-spa-inspector] Page navigated to:", url);
       if (isMountedRef.current) {
-        setIsNavigating(true);
-        setApps(undefined);
+        // 不清除 apps 状态，保持界面稳定，避免闪烁
+        // 只在后台静默重试获取新的应用列表
+        // 如果已有 apps 数据，则静默刷新；如果没有，则显示 navigating 状态
+        if (!apps) {
+          setIsNavigating(true);
+        }
         // 延迟后开始重试获取应用列表
         setTimeout(() => {
           if (isMountedRef.current) {
@@ -121,7 +125,7 @@ function PanelRoot(props) {
         browser.devtools.network.onNavigated.removeListener(onNavigated);
       };
     }
-  }, [fetchAppsWithRetry]);
+  }, [fetchAppsWithRetry, apps]);
 
   useEffect(() => {
     document.body.classList.add(props.theme);
@@ -235,9 +239,9 @@ async function getApps(setAppsFn) {
       setAppsFn(results);
     }
   } catch (err) {
-    // 对于可恢复的协议错误，不抛出
-    if (isRecoverableProtocolError(err)) {
-      console.warn("[single-spa-inspector] Recoverable error in getApps:", err.message);
+      // 对于可恢复的协议错误，不抛出
+      if (isRecoverableProtocolError(err)) {
+        console.debug("[single-spa-inspector] Recoverable error in getApps:", err.message);
       return;
     }
     throw err;
@@ -249,7 +253,7 @@ function contentScriptListener(setApps, setIsNavigating, msg) {
     getApps(setApps).catch((err) => {
       // 对于可恢复的协议错误，设置导航状态
       if (isRecoverableProtocolError(err)) {
-        console.warn("[single-spa-inspector] Recoverable error after routing event:", err.message);
+        console.debug("[single-spa-inspector] Recoverable error after routing event:", err.message);
         setIsNavigating(true);
         return;
       }

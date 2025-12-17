@@ -33,7 +33,7 @@ export default function useImportMapOverrides() {
     } catch (err) {
       // 对于可恢复的协议错误，不抛出，只记录
       if (isRecoverableProtocolError(err)) {
-        console.warn("[single-spa-inspector] Recoverable error during checkImportMapOverrides:", err.message);
+        console.debug("[single-spa-inspector] Recoverable error during checkImportMapOverrides:", err.message);
         setProtocolError(err);
         return false;
       }
@@ -52,7 +52,7 @@ export default function useImportMapOverrides() {
     } catch (err) {
       // 对于可恢复的协议错误，不抛出，只记录
       if (isRecoverableProtocolError(err)) {
-        console.warn("[single-spa-inspector] Recoverable error during getImportMapOverrides:", err.message);
+        console.debug("[single-spa-inspector] Recoverable error during getImportMapOverrides:", err.message);
         setProtocolError(err);
         return;
       }

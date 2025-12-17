@@ -3,8 +3,10 @@ build
 web-ext-artifacts
 # prefer package-lock.json
 yarn.lock
-# "Keep it secret. Keep it safe." - Galdalf the Grey
-.env*
+# "Keep it secret. Keep it safe." - Gandalf the Grey
+.env
+.env.local
+!.env.example
 
-# local doc
-doc
+# dist folder for Chrome build (generated)
+dist-chrome/build

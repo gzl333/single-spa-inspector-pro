@@ -11,7 +11,10 @@
     "default_title": "single-spa Inspector v3"
   },
   "icons": {
-    "96": "./logo-white-bgblue.png"
+    "16": "./logo-white-bgblue.png",
+    "48": "./logo-white-bgblue.png",
+    "96": "./logo-white-bgblue.png",
+    "128": "./logo-white-bgblue.png"
   },
   "devtools_page": "./build/main.html",
   "permissions": [
