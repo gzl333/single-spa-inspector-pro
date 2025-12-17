@@ -9,8 +9,38 @@ import browser from "webextension-polyfill";
 // But connections will be re-established when panel is opened
 let portsToPanel = new Map();
 
-// Listen for messages from content scripts
+// Handle clear cache request
+async function handleClearCache(msg) {
+  const { tabId, dataTypes } = msg;
+  
+  try {
+    // Clear browsing data
+    await browser.browsingData.remove(
+      { since: 0 },
+      dataTypes || {
+        cache: true,
+        cacheStorage: true,
+        serviceWorkers: true
+      }
+    );
+    
+    // Reload the tab with cache bypass
+    await browser.tabs.reload(tabId, { bypassCache: true });
+    
+    return { success: true };
+  } catch (error) {
+    console.error("Error clearing cache:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+// Listen for messages from content scripts and devtools panel
 browser.runtime.onMessage.addListener((msg, sender) => {
+  // Handle clear-cache request from devtools panel
+  if (msg.type === "clear-cache") {
+    return handleClearCache(msg);
+  }
+  
   // Forward message to the devtools panel for the same tab
   const tabId = sender.tab?.id;
   if (tabId) {
@@ -46,4 +76,28 @@ browser.runtime.onConnect.addListener((port) => {
       }
     }
   });
+});
+
+// Listen for toolbar button (action) click - Clear Cache & Refresh
+browser.action.onClicked.addListener(async (tab) => {
+  if (!tab.id) return;
+  
+  try {
+    // Clear browsing data
+    await browser.browsingData.remove(
+      { since: 0 },
+      {
+        cache: true,
+        cacheStorage: true,
+        serviceWorkers: true
+      }
+    );
+    
+    // Reload the tab with cache bypass
+    await browser.tabs.reload(tab.id, { bypassCache: true });
+    
+    console.log("Cache cleared and page refreshed for tab:", tab.id);
+  } catch (error) {
+    console.error("Error clearing cache from toolbar button:", error);
+  }
 });

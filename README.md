@@ -33,6 +33,17 @@
 
 **Storage:** Override URLs are persisted in `browser.storage.local`, surviving browser restarts.
 
+### 🗑️ Clear Cache & Refresh (v3.1.0)
+
+**One-click cache clearing for micro-frontend development:**
+
+- **Clear Cache Button** in the top-left corner of the Applications tab
+- Clears HTTP cache, Service Worker cache, and Cache Storage
+- Automatically refreshes the page after clearing
+- Visual feedback: "Clearing..." → "✓ Cleared!" or "✗ Failed"
+
+This feature is essential for micro-frontend development where you need to ensure fresh resources are loaded.
+
 ### 📦 Build Improvements
 
 - Separate build scripts for Chrome and Firefox
@@ -60,8 +71,8 @@ This is normal and required for local development overrides to work.
 ### From Release (Recommended)
 
 Download the latest release:
-- **Chrome**: `single-spa-inspector-v3-chrome-3.0.0.zip`
-- **Firefox**: `single-spa-inspector-v3-firefox-3.0.0.zip`
+- **Chrome**: `single-spa-inspector-v3-chrome-3.1.0.zip`
+- **Firefox**: `single-spa-inspector-v3-firefox-3.1.0.zip`
 
 **Chrome Installation:**
 1. Open `chrome://extensions/`
@@ -69,9 +80,22 @@ Download the latest release:
 3. Drag and drop the zip file, or unzip and "Load unpacked"
 
 **Firefox Installation:**
-1. Open `about:addons`
-2. Click gear icon → "Install Add-on From File..."
-3. Select the zip file
+
+> ⚠️ **Note**: Standard Firefox requires add-ons to be digitally signed by Mozilla. Locally built extensions cannot be installed directly. Use one of the following methods:
+
+**Method 1: Use Firefox Developer Edition or Nightly (Recommended for development)**
+1. Download [Firefox Developer Edition](https://www.mozilla.org/firefox/developer/) or [Firefox Nightly](https://www.mozilla.org/firefox/nightly/)
+2. Type `about:config` in the address bar and press Enter
+3. Click "Accept the Risk and Continue"
+4. Search for `xpinstall.signatures.required`
+5. Set it to `false`
+6. Then open `about:addons` → Click gear icon → "Install Add-on From File..." → Select the zip file
+
+**Method 2: Temporary Loading (Simplest, but resets after restart)**
+1. Type `about:debugging` in Firefox address bar
+2. Click "This Firefox" on the left
+3. Click "Load Temporary Add-on..."
+4. Select the `manifest.json` file in the extension directory
 
 ### Build from Source
 
@@ -96,6 +120,7 @@ Output files will be in `web-ext-artifacts/` directory.
 
 | Version | Changes |
 |---------|---------|
+| **v3.1.0** | Clear Cache & Refresh feature; One-click cache clearing for micro-frontend development |
 | **v3.0.0** | Manifest V3 support; Import Override Toggle UI; Storage persistence |
 | v0.5.0 | Original version (Manifest V2) |
 

@@ -3,6 +3,7 @@ import { Scoped, always } from "kremling";
 import AppStatusOverride from "./app-status-override.component";
 import Button from "./button";
 import ToggleSwitch from "./toggle-switch";
+import ClearCacheButton from "./clear-cache-button";
 import { evalDevtoolsCmd } from "../inspected-window.helper.js";
 import useImportMapOverrides from "./useImportMapOverrides";
 import ToggleGroup from "./toggle-group";
@@ -97,7 +98,8 @@ export default function Apps(props) {
   return (
     <Scoped css={css}>
       <span>
-        <div>
+        <div className="toolbar">
+          <ClearCacheButton />
           <ToggleGroup
             name="overlaysDisplayOption"
             value={overlaysEnabled}
@@ -262,6 +264,14 @@ body {
 body.dark {
   background-color: #272822;
   color: #F8F8F2;
+}
+
+& .toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--table-spacing);
+  margin-bottom: var(--table-spacing);
 }
 
 & [role="table"] {
