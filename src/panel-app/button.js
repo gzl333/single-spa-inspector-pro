@@ -1,10 +1,10 @@
 import React from "react";
 import { useCss } from "kremling";
 
-export default function Button({ children, ...props }) {
+export default function Button({ children, className = "", ...props }) {
   const scope = useCss(css);
   return (
-    <button {...props} {...scope} className="button">
+    <button {...props} {...scope} className={`button ${className}`.trim()}>
       {children}
     </button>
   );

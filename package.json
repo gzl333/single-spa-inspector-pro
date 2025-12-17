@@ -1,6 +1,6 @@
 {
   "name": "single-spa-inspector-v3",
-  "version": "3.1.0",
+  "version": "3.1.1",
   "description": "A devtools extension for single-spa applications (Manifest V3)",
   "scripts": {
     "prebuild": "npm run webpack-build && npm run lint",
@@ -30,7 +30,7 @@
     "devtools",
     "manifest-v3"
   ],
-  "author": "Anthony Frehner",
+  "author": "gzl333",
   "license": "MIT",
   "devDependencies": {
     "@babel/core": "^7.15.5",

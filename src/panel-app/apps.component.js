@@ -28,6 +28,8 @@ export default function Apps(props) {
   const [editingApps, setEditingApps] = useState({});
   // 编辑中的临时值
   const [editValues, setEditValues] = useState({});
+  // Reset All 确认状态
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
 
   useEffect(() => {
     if (overlaysEnabled === LIST && hovered) {
@@ -67,9 +69,13 @@ export default function Apps(props) {
   const handleSaveAndRefresh = async (appName) => {
     const url = editValues[appName];
     if (url && url.trim()) {
+      // 有 URL，保存并启用
       await importMaps.saveOverride(appName, url.trim());
-      setEditingApps({ ...editingApps, [appName]: false });
+    } else {
+      // 空 URL，清空地址并关闭 toggle
+      await importMaps.clearSavedOverride(appName);
     }
+    setEditingApps({ ...editingApps, [appName]: false });
   };
 
   // Toggle 切换
@@ -95,6 +101,12 @@ export default function Apps(props) {
     return !!importMaps.savedOverrides[appName]?.url;
   };
 
+  // 验证 URL 是否以 .js 结尾
+  const isValidJsUrl = (url) => {
+    if (!url || !url.trim()) return true; // 空值不显示错误
+    return url.trim().toLowerCase().endsWith('.js');
+  };
+
   return (
     <Scoped css={css}>
       <span>
@@ -117,7 +129,36 @@ export default function Apps(props) {
             <span role="columnheader">Status</span>
             <span role="columnheader">Actions</span>
             {importMaps.enabled && (
-              <span role="columnheader">Import Override</span>
+              <span role="columnheader" className="import-override-header">
+                Import Override
+                {showResetConfirm ? (
+                  <span className="reset-confirm">
+                    <span className="reset-confirm-text">Delete all saved overrides and refresh?</span>
+                    <Button 
+                      className="reset-confirm-btn"
+                      onClick={() => {
+                        importMaps.clearAllOverrides();
+                        setShowResetConfirm(false);
+                      }}
+                    >
+                      Confirm
+                    </Button>
+                    <Button 
+                      className="reset-cancel-btn"
+                      onClick={() => setShowResetConfirm(false)}
+                    >
+                      Cancel
+                    </Button>
+                  </span>
+                ) : (
+                  <Button 
+                    className="reset-all-btn"
+                    onClick={() => setShowResetConfirm(true)}
+                  >
+                    Reset All
+                  </Button>
+                )}
+              </span>
             )}
           </div>
           {sortedApps.map((app) => (
@@ -143,22 +184,51 @@ export default function Apps(props) {
               {importMaps.enabled && (
                 <div role="cell" className="import-override-cell">
                   {/* Toggle 开关 */}
-                  <ToggleSwitch
-                    checked={isToggleEnabled(app.name)}
-                    onChange={(enabled) => handleToggle(app.name, enabled)}
-                    disabled={!hasSavedUrl(app.name)}
-                  />
+                  <div className="toggle-wrapper">
+                    <ToggleSwitch
+                      checked={isToggleEnabled(app.name)}
+                      onChange={(enabled) => handleToggle(app.name, enabled)}
+                      disabled={!hasSavedUrl(app.name)}
+                    />
+                  </div>
                   
-                  {/* Input */}
-                  <input
-                    className={always("import-override").maybe("editing", editingApps[app.name])}
-                    value={getDisplayUrl(app.name)}
-                    readOnly={!editingApps[app.name]}
-                    onChange={(e) => {
-                      setEditValues({ ...editValues, [app.name]: e.target.value });
-                    }}
-                    placeholder="Enter override URL..."
-                  />
+                  {/* Input 容器 */}
+                  <div className="input-container">
+                    <div className="input-wrapper">
+                      <input
+                        className={always("import-override")
+                          .maybe("editing", editingApps[app.name])
+                          .maybe("invalid", editingApps[app.name] && !isValidJsUrl(editValues[app.name]))}
+                        value={getDisplayUrl(app.name)}
+                        readOnly={!editingApps[app.name]}
+                        onChange={(e) => {
+                          setEditValues({ ...editValues, [app.name]: e.target.value });
+                        }}
+                        onClick={() => {
+                          // 当 input 为空时，点击 input 进入 edit 模式
+                          if (!editingApps[app.name] && !getDisplayUrl(app.name)) {
+                            startEdit(app.name);
+                          }
+                        }}
+                        placeholder="Enter override URL..."
+                      />
+                      {/* Clear 按钮 - 仅在 edit 模式且有内容时显示 */}
+                      {editingApps[app.name] && editValues[app.name] && (
+                        <button
+                          className="input-clear-btn"
+                          onClick={() => setEditValues({ ...editValues, [app.name]: "" })}
+                          type="button"
+                          title="Clear"
+                        >
+                          ×
+                        </button>
+                      )}
+                    </div>
+                    {/* 验证提示 - 仅在 edit 模式且 URL 不以 .js 结尾时显示 */}
+                    {editingApps[app.name] && !isValidJsUrl(editValues[app.name]) && (
+                      <span className="url-warning">URL of an APP must end with .js</span>
+                    )}
+                  </div>
                   
                   {/* 按钮容器 - 固定宽度防止 UI 跳动 */}
                   <div className="override-buttons">
@@ -268,17 +338,18 @@ body.dark {
 
 & .toolbar {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-start;
   align-items: center;
+  gap: 16px;
   padding: var(--table-spacing);
-  margin-bottom: var(--table-spacing);
+  margin-bottom: 0;
 }
 
 & [role="table"] {
   display: table;
   border-collapse: separate;
-  border-spacing: calc(var(--table-spacing) * 2) var(--table-spacing);
-  padding: var(--table-spacing);
+  border-spacing: calc(var(--table-spacing) * 2) 2px;
+  padding: 0 var(--table-spacing);
 }
 
 & [role="columnheader"] {
@@ -296,8 +367,9 @@ body.dark {
 & [role="row"] [role="cell"],
 & [role="row"] [role="columnheader"] {
   display: table-cell;
-  vertical-align: middle;
+  vertical-align: top;
   white-space: nowrap;
+  padding-top: 2px;
 }
 
 & .app-status {
@@ -318,9 +390,62 @@ body.dark {
 }
 
 & .import-override-cell {
+  display: inline-flex !important;
+  align-items: flex-start;
+  gap: 8px;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
+& .toggle-wrapper {
+  flex-shrink: 0;
+}
+
+& .input-container {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+& .input-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+& .url-warning {
+  color: var(--pink);
+  font-size: .65rem;
+  white-space: nowrap;
+}
+
+& .import-override.invalid {
+  border-color: var(--pink);
+}
+
+& .input-clear-btn {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 16px;
+  border: none;
+  background: #999;
+  color: #fff;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 0;
   display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: center;
+}
+
+& .input-clear-btn:hover {
+  background: #666;
 }
 
 & .override-buttons {
@@ -329,6 +454,7 @@ body.dark {
   width: 130px;
   flex-shrink: 0;
   justify-content: flex-start;
+  align-self: flex-start;
 }
 
 & .override-buttons .button {
@@ -342,8 +468,9 @@ body.dark {
   box-sizing: border-box;
   font-size: .75rem;
   padding: .2rem;
+  padding-right: 22px;
   transition: all .15s ease-in-out;
-  width: 200px;
+  width: 210px;
 }
 
 & .import-override:read-only {
@@ -359,5 +486,56 @@ body.dark {
 & .import-override:focus {
   border-color: var(--blue);
   outline: none;
+}
+
+& .import-override-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+& .reset-all-btn {
+  background-color: var(--pink);
+  color: #fff;
+  font-size: .7rem;
+  padding: .2rem .5rem;
+}
+
+& .reset-all-btn:hover {
+  background-color: #c4264f;
+}
+
+& .reset-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+& .reset-confirm-text {
+  color: var(--pink);
+  font-size: .75rem;
+  font-weight: normal;
+}
+
+& .reset-confirm-btn {
+  background-color: var(--pink);
+  color: #fff;
+  font-size: .7rem;
+  padding: .2rem .5rem;
+}
+
+& .reset-confirm-btn:hover {
+  background-color: #c4264f;
+}
+
+& .reset-cancel-btn {
+  background-color: var(--gray);
+  color: #fff;
+  font-size: .7rem;
+  padding: .2rem .5rem;
+}
+
+& .reset-cancel-btn:hover {
+  background-color: #6a6f7d;
 }
 `;

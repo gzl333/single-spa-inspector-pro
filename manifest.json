@@ -2,9 +2,9 @@
   "manifest_version": 3,
   "name": "single-spa Inspector v3",
   "short_name": "sspa Inspect v3",
-  "version": "3.1.0",
-  "author": "Anthony Frehner",
-  "homepage_url": "https://github.com/single-spa/single-spa-inspector",
+  "version": "3.1.1",
+  "author": "gzl333",
+  "homepage_url": "https://github.com/gzl333/single-spa-inspector-v3",
   "description": "A devtools panel for single-spa applications (Manifest V3)",
   "action": {
     "default_icon": "./logo-white-bgblue.png",

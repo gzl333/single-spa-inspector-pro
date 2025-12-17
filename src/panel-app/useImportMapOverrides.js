@@ -145,10 +145,38 @@ export default function useImportMapOverrides() {
       await browser.storage.local.set({ savedOverrides: newSavedOverrides });
       setSavedOverrides(newSavedOverrides);
       
-      // 同时移除页面上的 override
-      await removeOverride(appName);
+      // 同时移除页面上的 override（忽略错误）
+      try {
+        await removeOverride(appName);
+      } catch (e) {
+        // 忽略移除错误
+      }
     } catch (err) {
       err.message = `Error clearing saved override: ${err.message}`;
+      setAppError(err);
+    }
+    
+    // 无论如何都刷新页面
+    await evalCmd(`window.location.reload()`);
+  }, [savedOverrides]);
+
+  // 清除所有已保存的 overrides
+  const clearAllOverrides = useCallback(async () => {
+    try {
+      // 移除页面上所有的 overrides
+      const removePromises = Object.keys(savedOverrides).map(appName => 
+        removeOverride(appName)
+      );
+      await Promise.all(removePromises);
+      
+      // 清空 storage
+      await browser.storage.local.set({ savedOverrides: {} });
+      setSavedOverrides({});
+      
+      // 刷新页面
+      await evalCmd(`window.location.reload()`);
+    } catch (err) {
+      err.message = `Error clearing all overrides: ${err.message}`;
       setAppError(err);
     }
   }, [savedOverrides]);
@@ -194,6 +222,7 @@ export default function useImportMapOverrides() {
     saveOverride,
     toggleOverride,
     clearSavedOverride,
+    clearAllOverrides,
     commitOverrides: batchSetOverrides,
   };
 }

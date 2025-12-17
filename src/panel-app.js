@@ -53,10 +53,15 @@ function PanelRoot(props) {
   return (
     <>
       <Tabs>
-        <TabList>
-          <Tab>Applications</Tab>
-          <Tab>Profiler</Tab>
-        </TabList>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <TabList>
+            <Tab>Applications</Tab>
+            <Tab>Profiler</Tab>
+          </TabList>
+          <span style={{ color: '#82889a', fontSize: '0.75rem', paddingRight: '8px' }}>
+            v{browser.runtime.getManifest().version}
+          </span>
+        </div>
 
         <TabPanels style={{ marginTop: "16px" }}>
           <TabPanel>
