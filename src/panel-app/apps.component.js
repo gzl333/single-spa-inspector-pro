@@ -349,7 +349,8 @@ body.dark {
   display: table;
   border-collapse: separate;
   border-spacing: calc(var(--table-spacing) * 2) 2px;
-  padding: 0 var(--table-spacing);
+  padding: 0;
+  margin-left: calc(var(--table-spacing) - var(--table-spacing) * 2);
 }
 
 & [role="columnheader"] {

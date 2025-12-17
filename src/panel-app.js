@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import ReactDOM from "react-dom";
-import { evalDevtoolsCmd } from "./inspected-window.helper";
+import { evalDevtoolsCmd, ProtocolError } from "./inspected-window.helper";
 import browser from "webextension-polyfill";
 import Apps from "./panel-app/apps.component";
 import ErrorBoundary from "./panel-app/ErrorBoundary.component";
@@ -8,22 +8,120 @@ import Profiler from "./profiler/profiler.js";
 import { Tabs, TabList, Tab, TabPanels, TabPanel } from "@reach/tabs";
 import "@reach/tabs/styles.css";
 
+// 判断是否为可恢复的协议错误
+function isRecoverableProtocolError(err) {
+  return err instanceof ProtocolError || err?.isRecoverable === true;
+}
+
 function PanelRoot(props) {
   const [apps, setApps] = useState();
   const [appError, setAppError] = useState();
+  // 新增：页面导航状态
+  const [isNavigating, setIsNavigating] = useState(false);
+  // 新增：用于触发重新加载的 key
+  const [reloadKey, setReloadKey] = useState(0);
+  // 用于跟踪组件是否已挂载
+  const isMountedRef = useRef(true);
 
   if (appError) {
     throw appError;
   }
 
-  useEffect(() => {
+  // 手动重载函数
+  const handleManualReload = useCallback(() => {
+    setApps(undefined);
+    setIsNavigating(false);
+    setReloadKey(k => k + 1);
+  }, []);
+
+  // 获取应用列表（带有错误恢复处理）
+  const fetchApps = useCallback(async () => {
     try {
-      getApps(setApps);
+      const results = await evalDevtoolsCmd(`exposedMethods?.getRawAppData()`);
+      if (isMountedRef.current && results) {
+        setApps(results);
+        setIsNavigating(false);
+      }
     } catch (err) {
+      // 对于可恢复的协议错误，不抛出，只记录并等待
+      if (isRecoverableProtocolError(err)) {
+        console.warn("[single-spa-inspector] Recoverable error during getApps:", err.message);
+        // 可能是页面导航中，设置导航状态
+        if (isMountedRef.current) {
+          setIsNavigating(true);
+        }
+        return;
+      }
       err.message = `Error during getApps: ${err.message}`;
-      setAppError(err);
+      if (isMountedRef.current) {
+        setAppError(err);
+      }
     }
   }, []);
+
+  // 初始化时获取应用列表
+  useEffect(() => {
+    isMountedRef.current = true;
+    fetchApps();
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, [fetchApps, reloadKey]);
+
+  // 带重试的获取应用列表
+  const fetchAppsWithRetry = useCallback(async (maxRetries = 5, interval = 1500) => {
+    for (let i = 0; i < maxRetries; i++) {
+      if (!isMountedRef.current) return;
+      
+      try {
+        const results = await evalDevtoolsCmd(`exposedMethods?.getRawAppData()`);
+        if (isMountedRef.current && results) {
+          setApps(results);
+          setIsNavigating(false);
+          console.log(`[single-spa-inspector] Apps loaded successfully on attempt ${i + 1}`);
+          return;
+        }
+      } catch (err) {
+        console.warn(`[single-spa-inspector] Attempt ${i + 1}/${maxRetries} failed:`, err.message);
+      }
+      
+      // 等待一段时间再重试
+      if (i < maxRetries - 1) {
+        await new Promise(resolve => setTimeout(resolve, interval));
+      }
+    }
+    
+    // 所有重试都失败了，清除导航状态让用户可以手动重试
+    if (isMountedRef.current) {
+      setIsNavigating(false);
+      console.warn("[single-spa-inspector] All retry attempts failed, waiting for manual reload");
+    }
+  }, []);
+
+  // 监听页面导航事件
+  useEffect(() => {
+    function onNavigated(url) {
+      console.log("[single-spa-inspector] Page navigated to:", url);
+      if (isMountedRef.current) {
+        setIsNavigating(true);
+        setApps(undefined);
+        // 延迟后开始重试获取应用列表
+        setTimeout(() => {
+          if (isMountedRef.current) {
+            fetchAppsWithRetry();
+          }
+        }, 800);
+      }
+    }
+
+    // 监听 devtools 导航事件
+    if (browser.devtools?.network?.onNavigated) {
+      browser.devtools.network.onNavigated.addListener(onNavigated);
+      return () => {
+        browser.devtools.network.onNavigated.removeListener(onNavigated);
+      };
+    }
+  }, [fetchAppsWithRetry]);
 
   useEffect(() => {
     document.body.classList.add(props.theme);
@@ -33,7 +131,7 @@ function PanelRoot(props) {
   }, [props.theme]);
 
   useEffect(() => {
-    const boundEvtListener = contentScriptListener.bind(null, setApps);
+    const boundEvtListener = contentScriptListener.bind(null, setApps, setIsNavigating);
     window.addEventListener("ext-content-script", boundEvtListener);
 
     return () => {
@@ -41,14 +139,48 @@ function PanelRoot(props) {
     };
   }, []);
 
-  if (!apps)
+  // 加载中或导航中状态
+  if (!apps) {
     return (
-      <div>
-        Loading... if you see this message for a long time, either single-spa is
-        not on the page or you are not running a version of single-spa that
-        supports developer tools
+      <div style={{ padding: "16px" }}>
+        {isNavigating ? (
+          <>
+            <p style={{ color: "#e67e22" }}>
+              <strong>⏳ Page is navigating...</strong>
+            </p>
+            <p>
+              The inspected page is loading. Auto-retrying to connect...
+            </p>
+            <p style={{ color: "#82889a", fontSize: "12px" }}>
+              If this takes too long, click the button below to manually reload.
+            </p>
+          </>
+        ) : (
+          <p>
+            Loading... if you see this message for a long time, either single-spa is
+            not on the page or you are not running a version of single-spa that
+            supports developer tools
+          </p>
+        )}
+        <button
+          onClick={handleManualReload}
+          style={{
+            backgroundColor: "#3366ff",
+            color: "#fff",
+            border: "none",
+            borderRadius: "4px",
+            padding: "8px 16px",
+            fontSize: "13px",
+            fontWeight: "bold",
+            cursor: "pointer",
+            marginTop: "12px",
+          }}
+        >
+          Reload Single-spa Inspector v3
+        </button>
       </div>
     );
+  }
 
   return (
     <>
@@ -58,9 +190,29 @@ function PanelRoot(props) {
             <Tab>Applications</Tab>
             <Tab>Profiler</Tab>
           </TabList>
-          <span style={{ color: '#82889a', fontSize: '0.75rem', paddingRight: '8px' }}>
-            v{browser.runtime.getManifest().version}
-          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <button
+              onClick={handleManualReload}
+              title="Reload Inspector"
+              style={{
+                backgroundColor: "#3366ff",
+                color: "#fff",
+                border: "none",
+                borderRadius: "4px",
+                padding: "4px 8px",
+                fontSize: "12px",
+                cursor: "pointer",
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+              }}
+            >
+              Reload Single-spa Inspector v3
+            </button>
+            <span style={{ color: '#82889a', fontSize: '0.75rem', paddingRight: '8px' }}>
+              v{browser.runtime.getManifest().version}
+            </span>
+          </div>
         </div>
 
         <TabPanels style={{ marginTop: "16px" }}>
@@ -77,15 +229,30 @@ function PanelRoot(props) {
 }
 
 async function getApps(setAppsFn) {
-  const results = await evalDevtoolsCmd(`exposedMethods?.getRawAppData()`);
-  if (results) {
-    setAppsFn(results);
+  try {
+    const results = await evalDevtoolsCmd(`exposedMethods?.getRawAppData()`);
+    if (results) {
+      setAppsFn(results);
+    }
+  } catch (err) {
+    // 对于可恢复的协议错误，不抛出
+    if (isRecoverableProtocolError(err)) {
+      console.warn("[single-spa-inspector] Recoverable error in getApps:", err.message);
+      return;
+    }
+    throw err;
   }
 }
 
-function contentScriptListener(setApps, msg) {
+function contentScriptListener(setApps, setIsNavigating, msg) {
   if (msg.detail.from === "single-spa" && msg.detail.type === "routing-event") {
     getApps(setApps).catch((err) => {
+      // 对于可恢复的协议错误，设置导航状态
+      if (isRecoverableProtocolError(err)) {
+        console.warn("[single-spa-inspector] Recoverable error after routing event:", err.message);
+        setIsNavigating(true);
+        return;
+      }
       console.error("error in getting apps after update event");
       throw err;
     });

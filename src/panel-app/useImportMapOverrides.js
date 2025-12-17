@@ -1,12 +1,21 @@
 import { useState, useEffect, useCallback } from "react";
-import { evalCmd } from "../inspected-window.helper.js";
+import { evalCmd, ProtocolError } from "../inspected-window.helper.js";
 import browser from "webextension-polyfill";
+
+// 判断是否为可恢复的协议错误（不应导致面板崩溃）
+function isRecoverableProtocolError(err) {
+  return err instanceof ProtocolError || err?.isRecoverable === true;
+}
 
 export default function useImportMapOverrides() {
   const [importMapsEnabled, setImportMapEnabled] = useState(false);
   const [overrides, setOverrides] = useState({});
   const [savedOverrides, setSavedOverrides] = useState({});
   const [appError, setAppError] = useState();
+  // 新增：加载状态，用于显示页面正在加载
+  const [isLoading, setIsLoading] = useState(false);
+  // 新增：协议错误状态（可恢复，不崩溃）
+  const [protocolError, setProtocolError] = useState(null);
 
   if (appError) {
     throw appError;
@@ -19,8 +28,15 @@ export default function useImportMapOverrides() {
       const hasImportMapsEnabled = await evalCmd(`(function() {
         return !!window.importMapOverrides
       })()`);
+      setProtocolError(null); // 成功后清除协议错误
       return hasImportMapsEnabled;
     } catch (err) {
+      // 对于可恢复的协议错误，不抛出，只记录
+      if (isRecoverableProtocolError(err)) {
+        console.warn("[single-spa-inspector] Recoverable error during checkImportMapOverrides:", err.message);
+        setProtocolError(err);
+        return false;
+      }
       err.message = `Error during hasImporMapsEnabled. ${err.message}`;
       setAppError(err);
     }
@@ -32,7 +48,14 @@ export default function useImportMapOverrides() {
         return window.importMapOverrides.getOverrideMap()
       })()`);
       setOverrides(imports);
+      setProtocolError(null); // 成功后清除协议错误
     } catch (err) {
+      // 对于可恢复的协议错误，不抛出，只记录
+      if (isRecoverableProtocolError(err)) {
+        console.warn("[single-spa-inspector] Recoverable error during getImportMapOverrides:", err.message);
+        setProtocolError(err);
+        return;
+      }
       err.message = `Error during getImportMapOverrides. ${err.message}`;
       setAppError(err);
     }
@@ -224,5 +247,9 @@ export default function useImportMapOverrides() {
     clearSavedOverride,
     clearAllOverrides,
     commitOverrides: batchSetOverrides,
+    // 新增：暴露状态和方法供外部使用
+    isLoading,
+    protocolError,
+    clearProtocolError: () => setProtocolError(null),
   };
 }
