@@ -275,31 +275,30 @@ body.dark {
 }
 
 & [role="table"] {
-  display: grid;
-  grid-row-gap: var(--table-spacing);
-  grid-template-columns: 1fr;
+  display: table;
+  border-collapse: separate;
+  border-spacing: calc(var(--table-spacing) * 2) var(--table-spacing);
   padding: var(--table-spacing);
-  width: max-content;
 }
 
 & [role="columnheader"] {
   color: var(--gray);
   font-size: .9rem;
   padding-left: .25rem;
+  text-align: left;
+  white-space: nowrap;
 }
 
 & [role="row"] {
-  align-items: center;
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr 2fr;
-  grid-column-gap: calc(var(--table-spacing) * 2);
+  display: table-row;
 }
 
-& [role="row"] [role="cell"]:nth-child(1) { grid-area: 1 / 1 / 2 / 2; }
-& [role="row"] [role="cell"]:nth-child(2) { grid-area: 1 / 2 / 2 / 3; }
-& [role="row"] [role="cell"]:nth-child(3) { grid-area: 1 / 3 / 2 / 4; }
-& [role="row"] [role="cell"]:nth-child(4), 
-& [role="row"] [role="cell"].summary-action { grid-area: 1 / 4 / 2 / 5; }
+& [role="row"] [role="cell"],
+& [role="row"] [role="columnheader"] {
+  display: table-cell;
+  vertical-align: middle;
+  white-space: nowrap;
+}
 
 & .app-status {
   border-radius: 1rem;
@@ -325,15 +324,15 @@ body.dark {
 }
 
 & .override-buttons {
-  display: flex;
+  display: inline-flex;
   gap: 4px;
-  min-width: 120px;
+  width: 130px;
   flex-shrink: 0;
   justify-content: flex-start;
 }
 
 & .override-buttons .button {
-  min-width: 50px;
+  min-width: 60px;
   text-align: center;
 }
 
@@ -344,8 +343,7 @@ body.dark {
   font-size: .75rem;
   padding: .2rem;
   transition: all .15s ease-in-out;
-  flex: 1;
-  min-width: 200px;
+  width: 200px;
 }
 
 & .import-override:read-only {
