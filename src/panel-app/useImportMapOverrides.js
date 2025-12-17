@@ -381,6 +381,8 @@ export default function useImportMapOverrides() {
       const ready = await ensureImportMapOverridesReady();
       if (!ready) {
         console.warn("[single-spa-inspector-pro] removeOverride skipped because importMapOverrides not ready");
+        // Fallback: directly remove from localStorage as backup
+        await removeOverrideFromLocalStorage(currentMap);
         return false;
       }
       await evalCmd(`(function() {
@@ -390,11 +392,51 @@ export default function useImportMapOverrides() {
     } catch (err) {
       if (isMissingImportMapOverrides(err)) {
         console.warn("[single-spa-inspector-pro] removeOverride failed because importMapOverrides missing (will retry later)");
+        // Fallback: directly remove from localStorage as backup
+        await removeOverrideFromLocalStorage(currentMap);
         return false;
       }
       err.message = `Error during removeOverride. ${err.message}`;
       setAppError(err);
       return false;
+    }
+  }
+
+  // Fallback method: directly remove override from localStorage
+  // This is used when importMapOverrides is not ready but we need to ensure the override is removed
+  async function removeOverrideFromLocalStorage(appName) {
+    try {
+      await evalCmd(`(function() {
+        // import-map-overrides stores overrides with key format: import-map-override:${appName}
+        localStorage.removeItem("import-map-override:${appName}");
+        console.debug("[single-spa-inspector-pro] Directly removed localStorage key: import-map-override:${appName}");
+      })()`);
+    } catch (err) {
+      console.warn("[single-spa-inspector-pro] Failed to directly remove from localStorage:", err);
+    }
+  }
+
+  // Clear all import-map-override entries from localStorage
+  // This ensures complete cleanup when Reset All is called
+  async function clearAllOverridesFromLocalStorage() {
+    try {
+      await evalCmd(`(function() {
+        // Find and remove all localStorage keys that start with "import-map-override:"
+        const keysToRemove = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && key.startsWith("import-map-override:")) {
+            keysToRemove.push(key);
+          }
+        }
+        keysToRemove.forEach(key => {
+          localStorage.removeItem(key);
+          console.debug("[single-spa-inspector-pro] Directly removed localStorage key:", key);
+        });
+        console.debug("[single-spa-inspector-pro] Cleared " + keysToRemove.length + " import-map-override entries from localStorage");
+      })()`);
+    } catch (err) {
+      console.warn("[single-spa-inspector-pro] Failed to clear all overrides from localStorage:", err);
     }
   }
 
@@ -513,6 +555,8 @@ export default function useImportMapOverrides() {
         ok = await addOverride(appName, saved.url);
       } else {
         ok = await removeOverride(appName);
+        // 关闭时，无论 API 是否成功，都直接清理 localStorage 作为保障
+        await removeOverrideFromLocalStorage(appName);
       }
       if (!ok) {
         setTimeout(() => {
@@ -562,8 +606,12 @@ export default function useImportMapOverrides() {
         return;
       }
 
-      // 同时移除页面上的 override（忽略错误）
+      // 同时移除页面上的 override（通过 API）
       const ok = await removeOverride(appName);
+      
+      // 无论 API 是否成功，都直接清理 localStorage 作为保障
+      await removeOverrideFromLocalStorage(appName);
+      
       if (!ok) {
         setTimeout(() => {
           ensureSavedOverridesApplied("clear-saved-retry", newSavedOverrides);
@@ -598,18 +646,22 @@ export default function useImportMapOverrides() {
     console.debug(`[single-spa-inspector-pro] Clear all overrides, version=${thisOperationVersion}`);
 
     try {
-      // 移除页面上所有的 overrides
+      // 移除页面上所有的 overrides (通过 importMapOverrides API)
       const removePromises = await Promise.all(
         Object.keys(savedOverrides).map(appName => removeOverride(appName))
       );
       const anyRemoveFailed = removePromises.some((ok) => ok === false);
+      
+      // 无论 API 是否成功，都直接清理 localStorage 作为保障
+      // 这确保即使 importMapOverrides 未加载，也能完全清除
+      await clearAllOverridesFromLocalStorage();
       
       // 检查这是否仍是最新操作
       if (thisOperationVersion !== currentOperationRef.current) {
         return;
       }
 
-      // 清空 storage
+      // 清空扩展的 storage
       await browser.storage.local.set({ savedOverrides: {} });
       setSavedOverrides({});
       

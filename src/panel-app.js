@@ -20,6 +20,8 @@ function PanelRoot(props) {
   const [isNavigating, setIsNavigating] = useState(false);
   // 新增：用于触发重新加载的 key
   const [reloadKey, setReloadKey] = useState(0);
+  // 新增：用于触发短暂刷新轮询的计数器
+  const [refreshTick, setRefreshTick] = useState(0);
   // 用于跟踪组件是否已挂载
   const isMountedRef = useRef(true);
 
@@ -32,6 +34,8 @@ function PanelRoot(props) {
     setApps(undefined);
     setIsNavigating(false);
     setReloadKey(k => k + 1);
+    // 触发一次短暂刷新
+    setRefreshTick(t => t + 1);
   }, []);
 
   // 获取应用列表（带有错误恢复处理）
@@ -115,6 +119,8 @@ function PanelRoot(props) {
             fetchAppsWithRetry();
           }
         }, 800);
+        // 触发一次短暂刷新
+        setRefreshTick(t => t + 1);
       }
     }
 
@@ -135,7 +141,12 @@ function PanelRoot(props) {
   }, [props.theme]);
 
   useEffect(() => {
-    const boundEvtListener = contentScriptListener.bind(null, setApps, setIsNavigating);
+    const boundEvtListener = contentScriptListener.bind(
+      null,
+      setApps,
+      setIsNavigating,
+      () => setRefreshTick(t => t + 1)
+    );
     window.addEventListener("ext-content-script", boundEvtListener);
 
     return () => {
@@ -149,6 +160,8 @@ function PanelRoot(props) {
     const handlePanelShown = () => {
       console.debug("[single-spa-inspector-pro] Panel shown, refreshing apps state");
       fetchApps();
+      // 触发一次短暂刷新
+      setRefreshTick(t => t + 1);
     };
     
     window.addEventListener("ext-panel-shown", handlePanelShown);
@@ -156,6 +169,51 @@ function PanelRoot(props) {
       window.removeEventListener("ext-panel-shown", handlePanelShown);
     };
   }, [fetchApps]);
+
+  // 短暂的“突发轮询”用于捕捉错过的路由事件
+  // 触发场景：面板显示、导航事件、手动刷新、收到 routing-event
+  useEffect(() => {
+    if (!apps) return; // 需有初始数据
+    if (!refreshTick) return; // 未触发刷新则跳过
+
+    const BURST_MS = 6000;      // 持续 6 秒
+    const INTERVAL_MS = 1200;   // 间隔约 1.2 秒
+    const start = Date.now();
+    let timeoutId;
+    let cancelled = false;
+
+    const run = async () => {
+      if (cancelled || !isMountedRef.current) return;
+      try {
+        const results = await evalDevtoolsCmd(`exposedMethods?.getRawAppData()`);
+        if (isMountedRef.current && results) {
+          setApps(prevApps => {
+            const hasChanges =
+              results.length !== prevApps?.length ||
+              results.some((newApp, index) => {
+                const oldApp = prevApps?.[index];
+                return !oldApp || oldApp.status !== newApp.status || oldApp.name !== newApp.name;
+              });
+            return hasChanges ? results : prevApps;
+          });
+        }
+      } catch (err) {
+        // 导航中可能报错，忽略
+        console.debug("[single-spa-inspector-pro] Burst refresh error:", err.message);
+      }
+
+      if (!cancelled && isMountedRef.current && Date.now() - start < BURST_MS) {
+        timeoutId = setTimeout(run, INTERVAL_MS);
+      }
+    };
+
+    timeoutId = setTimeout(run, 0);
+
+    return () => {
+      cancelled = true;
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+  }, [apps, refreshTick]);
 
   // 加载中或导航中状态
   if (!apps) {
@@ -262,7 +320,7 @@ async function getApps(setAppsFn) {
   }
 }
 
-function contentScriptListener(setApps, setIsNavigating, msg) {
+function contentScriptListener(setApps, setIsNavigating, triggerRefresh, msg) {
   if (msg.detail.from === "single-spa" && msg.detail.type === "routing-event") {
     getApps(setApps).catch((err) => {
       // 对于可恢复的协议错误，设置导航状态
@@ -274,6 +332,10 @@ function contentScriptListener(setApps, setIsNavigating, msg) {
       console.error("error in getting apps after update event");
       throw err;
     });
+    // 收到路由事件后触发一次短暂刷新，确保状态同步
+    if (typeof triggerRefresh === "function") {
+      triggerRefresh();
+    }
   }
 }
 
