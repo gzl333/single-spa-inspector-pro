@@ -38,9 +38,9 @@ function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-export async function evalDevtoolsCmd(devToolsCommandString) {
+export async function evalDevtoolsCmd(devToolsCommandString, options = {}) {
   const commandString = `window.__SINGLE_SPA_DEVTOOLS__.${devToolsCommandString}`;
-  return evalCmd(commandString);
+  return evalCmd(commandString, options);
 }
 
 export async function evalCmd(commandString, options = {}) {

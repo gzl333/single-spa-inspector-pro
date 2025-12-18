@@ -272,25 +272,30 @@ export default function Apps(props) {
   );
 }
 
+// 状态优先级映射（数字越小排越前）
+// 排序逻辑：已挂载 > 正在挂载/卸载 > 未挂载(已加载) > 正在加载/启动 > 未加载 > 错误
+const STATUS_PRIORITY = {
+  MOUNTED: 1,              // 已挂载
+  MOUNTING: 2,             // 正在挂载
+  UNMOUNTING: 2,           // 正在卸载
+  NOT_MOUNTED: 3,          // 未挂载（已加载过）
+  LOADING_SOURCE_CODE: 4,  // 正在加载源代码
+  BOOTSTRAPPING: 4,        // 正在启动
+  NOT_LOADED: 5,           // 未加载
+  SKIP_BECAUSE_BROKEN: 6,  // 因错误跳过
+  LOAD_ERROR: 6,           // 加载错误
+};
+
+function getAppPriority(app) {
+  return STATUS_PRIORITY[app.status] ?? 99;
+}
+
 function sortApps(apps) {
   return [...apps]
-    .sort((a, b) => {
-      const nameA = a.name.toUpperCase(); // ignore upper and lowercase
-      const nameB = b.name.toUpperCase(); // ignore upper and lowercase
-      if (nameA < nameB) {
-        return -1;
-      }
-      if (nameA > nameB) {
-        return 1;
-      }
-      // names must be equal
-      return 0;
-    })
-    .sort((a, b) => {
-      const statusA = a.status === "MOUNTED" || !!a.devtools.activeWhenForced;
-      const statusB = b.status === "MOUNTED" || !!b.devtools.activeWhenForced;
-      return statusB - statusA;
-    });
+    // 先按名称排序（作为相同优先级时的次要排序）
+    .sort((a, b) => a.name.toUpperCase().localeCompare(b.name.toUpperCase()))
+    // 再按状态优先级排序（稳定排序，相同优先级保持名称顺序）
+    .sort((a, b) => getAppPriority(a) - getAppPriority(b));
 }
 
 function groupApps(apps) {

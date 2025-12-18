@@ -55,6 +55,16 @@ This feature is essential for micro-frontend development where you need to ensur
 - **Visual feedback**: "Connection lost, auto-retrying..." indicator when reconnection is in progress
 - **Thorough localStorage cleanup**: Reset All and individual override clearing now directly remove `import-map-override:*` keys from localStorage, ensuring complete cleanup even when `importMapOverrides` API is unavailable
 
+### 🎨 Overlays Feature (v3.1.2)
+
+**Visual highlighting for mounted micro-frontend applications:**
+
+- **Off**: No overlays displayed
+- **On**: Show overlays on all mounted applications
+- **List Hover**: Show overlay only when hovering over an app in the list
+
+The overlays use the standard `#single-spa-application:<app-name>` container as the default target, and automatically resize when the container dimensions change. Custom overlay selectors can be configured via `app.devtools.overlays.selectors`.
+
 ### 📦 Build Improvements
 
 - Separate build scripts for Chrome and Firefox
@@ -131,7 +141,7 @@ Output files will be in `web-ext-artifacts/` directory.
 
 | Version | Changes |
 |---------|---------|
-| **v3.1.2** | Auto-recovery & real-time status: auto-reconnect on port disconnect, page/panel visibility recovery, stale detection fallback, thorough localStorage cleanup for import-map-overrides |
+| **v3.1.2** | Auto-recovery & real-time status: auto-reconnect on port disconnect, page/panel visibility recovery, stale detection fallback, thorough localStorage cleanup for import-map-overrides; Restored Overlays feature: fixed overlay helpers not being invoked after MV3 refactor; now uses ResizeObserver and default single-spa container fallback |
 | **v3.1.0** | Clear Cache & Refresh feature; One-click cache clearing for micro-frontend development |
 | **v3.0.0** | Manifest V3 support; Import Override Toggle UI; Storage persistence |
 | v0.5.0 | Original version (Manifest V2) |

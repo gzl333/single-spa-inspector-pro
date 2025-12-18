@@ -364,7 +364,11 @@ function PanelRoot(props) {
 
 async function getApps(setAppsFn) {
   try {
-    const results = await evalDevtoolsCmd(`exposedMethods?.getRawAppData()`);
+    // 使用更短的重试间隔，提升状态刷新速度（默认 500ms 太慢）
+    const results = await evalDevtoolsCmd(
+      `exposedMethods?.getRawAppData()`,
+      { retries: 1, retryDelay: 120 }
+    );
     if (results) {
       setAppsFn(results);
     }
