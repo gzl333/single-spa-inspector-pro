@@ -8,6 +8,7 @@ import { evalDevtoolsCmd } from "../inspected-window.helper.js";
 import useImportMapOverrides from "./useImportMapOverrides";
 import ToggleGroup from "./toggle-group";
 import ToggleOption from "./toggle-option";
+import browser from "webextension-polyfill";
 
 const OFF = "off",
   ON = "on",
@@ -30,6 +31,135 @@ export default function Apps(props) {
   const [editValues, setEditValues] = useState({});
   // Reset All 确认状态
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  // 文件输入 ref
+  const fileInputRef = React.useRef(null);
+  // 导入/导出消息提示
+  const [importExportMessage, setImportExportMessage] = useState(null); // { type: 'success' | 'error', text: '...' }
+
+  // Export override URLs
+  const handleExportOverrides = () => {
+    try {
+      // Export only appname and url from savedOverrides
+      const exportData = {};
+      Object.entries(importMaps.savedOverrides).forEach(([appName, config]) => {
+        if (config.url) {
+          exportData[appName] = config.url;
+        }
+      });
+
+      const dataStr = JSON.stringify(exportData, null, 2);
+      const blob = new Blob([dataStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'single-spa-override-urls.json';
+      link.click();
+      URL.revokeObjectURL(url);
+      
+      // Show success message
+      setImportExportMessage({ type: 'success', text: `Successfully exported ${Object.keys(exportData).length} app(s)` });
+      setTimeout(() => setImportExportMessage(null), 5000);
+    } catch (err) {
+      console.error('Error exporting overrides:', err);
+      setImportExportMessage({ type: 'error', text: 'Export failed. Check console for details.' });
+      setTimeout(() => setImportExportMessage(null), 5000);
+    }
+  };
+
+  // Click import button
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  // Import override URLs
+  const handleImportOverrides = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        // Validate JSON format
+        let importedData;
+        try {
+          importedData = JSON.parse(event.target.result);
+        } catch (parseErr) {
+          setImportExportMessage({ type: 'error', text: 'Import failed: Invalid JSON format' });
+          setTimeout(() => setImportExportMessage(null), 5000);
+          return;
+        }
+
+        // Validate object type
+        if (!importedData || typeof importedData !== 'object' || Array.isArray(importedData)) {
+          setImportExportMessage({ type: 'error', text: 'Import failed: Must be object format' });
+          setTimeout(() => setImportExportMessage(null), 5000);
+          return;
+        }
+
+        // Save imported data to savedOverrides with enabled set to false
+        const newSavedOverrides = {};
+        const skippedApps = [];  // Track skipped apps
+        
+        Object.entries(importedData).forEach(([appName, url]) => {
+          // Validate URL is string and not empty
+          if (typeof url !== 'string' || !url.trim()) {
+            skippedApps.push(appName);
+            return;
+          }
+          
+          newSavedOverrides[appName] = {
+            url: url.trim(),
+            enabled: false  // Disabled by default
+          };
+        });
+
+        // If all apps were skipped
+        if (Object.keys(newSavedOverrides).length === 0) {
+          setImportExportMessage({ type: 'error', text: 'Import failed: All URLs are empty' });
+          setTimeout(() => setImportExportMessage(null), 5000);
+          return;
+        }
+
+        // Merge with existing savedOverrides
+        const mergedOverrides = {
+          ...importMaps.savedOverrides,
+          ...newSavedOverrides
+        };
+
+        // Save to storage
+        await browser.storage.local.set({ savedOverrides: mergedOverrides });
+        
+        // Show import result
+        const successCount = Object.keys(newSavedOverrides).length;
+        let message = `Successfully imported ${successCount} app(s)`;
+        
+        if (skippedApps.length > 0) {
+          message += `, skipped ${skippedApps.length} empty URL(s)`;
+        }
+        
+        setImportExportMessage({ type: 'success', text: message });
+        
+        // Reload page after 3 seconds
+        setTimeout(() => {
+          window.location.reload();
+        }, 3000);
+      } catch (err) {
+        console.error('Error importing overrides:', err);
+        setImportExportMessage({ type: 'error', text: 'Import failed: ' + err.message });
+        setTimeout(() => setImportExportMessage(null), 5000);
+      }
+    };
+    
+    reader.onerror = () => {
+      setImportExportMessage({ type: 'error', text: 'Import failed: Cannot read file' });
+      setTimeout(() => setImportExportMessage(null), 5000);
+    };
+    
+    reader.readAsText(file);
+    
+    // Reset input to allow selecting the same file again
+    e.target.value = '';
+  };
 
   useEffect(() => {
     if (overlaysEnabled === LIST && hovered) {
@@ -122,6 +252,37 @@ export default function Apps(props) {
             <ToggleOption value={ON}>On</ToggleOption>
             <ToggleOption value={LIST}>List Hover</ToggleOption>
           </ToggleGroup>
+          
+          {importMaps.enabled && (
+            <div className="override-import-export">
+              <span className="override-label">Overrides</span>
+              <Button 
+                className="export-btn"
+                onClick={handleExportOverrides}
+                disabled={Object.keys(importMaps.savedOverrides).length === 0}
+              >
+                Export
+              </Button>
+              <Button 
+                className="import-btn"
+                onClick={handleImportClick}
+              >
+                Import
+              </Button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".json"
+                onChange={handleImportOverrides}
+                style={{ display: 'none' }}
+              />
+              {importExportMessage && (
+                <span className={`override-message ${importExportMessage.type}`}>
+                  {importExportMessage.text}
+                </span>
+              )}
+            </div>
+          )}
         </div>
         <div role="table" className={"table"}>
           <div role="row">
@@ -398,6 +559,55 @@ body.dark & .app-name {
   gap: 16px;
   padding: 4px var(--table-spacing);
   margin-bottom: 0;
+}
+
+& .override-import-export {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 24px;
+}
+
+& .override-label {
+  color: var(--gray);
+  font-size: .9rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+& .export-btn,
+& .import-btn {
+  background-color: var(--blue);
+  color: #fff;
+  font-size: .75rem;
+  padding: .3rem .6rem;
+  white-space: nowrap;
+}
+
+& .export-btn:hover:not(:disabled),
+& .import-btn:hover {
+  background-color: var(--blue-dark);
+}
+
+& .export-btn:disabled {
+  background-color: var(--gray);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+& .override-message {
+  font-size: .75rem;
+  font-weight: 500;
+  white-space: nowrap;
+  margin-left: 4px;
+}
+
+& .override-message.success {
+  color: var(--green);
+}
+
+& .override-message.error {
+  color: var(--pink);
 }
 
 & [role="table"] {
