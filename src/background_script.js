@@ -15,11 +15,11 @@ async function handleClearCache(msg) {
   
   try {
     // Clear browsing data
+    // Note: Firefox doesn't support cacheStorage property
     await browser.browsingData.remove(
       { since: 0 },
       dataTypes || {
         cache: true,
-        cacheStorage: true,
         serviceWorkers: true
       }
     );
@@ -136,15 +136,15 @@ browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 
 // Listen for toolbar button (action) click - Clear Cache & Refresh
 browser.action.onClicked.addListener(async (tab) => {
-  if (!tab.id) return;
+  if (!tab?.id) return;
   
   try {
     // Clear browsing data
+    // Note: Firefox doesn't support cacheStorage property
     await browser.browsingData.remove(
       { since: 0 },
       {
         cache: true,
-        cacheStorage: true,
         serviceWorkers: true
       }
     );

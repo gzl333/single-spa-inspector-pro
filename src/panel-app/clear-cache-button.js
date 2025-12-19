@@ -41,7 +41,6 @@ const ClearCacheButton = React.forwardRef(({ sharedState, setSharedState }, ref)
         tabId,
         dataTypes: {
           cache: true,
-          cacheStorage: true,
           serviceWorkers: true
         }
       });
@@ -85,7 +84,7 @@ const ClearCacheButton = React.forwardRef(({ sharedState, setSharedState }, ref)
         .maybe("error", status === "error")}
       onClick={handleClearCache}
       disabled={isClearing}
-      title="Clear browser cache (HTTP cache, Service Workers, Cache Storage) and refresh the page"
+      title="Clear browser cache (HTTP cache, Service Workers) and refresh the page"
     >
       {getButtonText()}
     </button>

@@ -43,7 +43,7 @@
 **One-click cache clearing for micro-frontend development:**
 
 - **Clear Cache Button** with beautiful gradient colors and animations
-- Clears HTTP cache, Service Worker cache, and Cache Storage
+- Clears HTTP cache and Service Workers
 - Automatically refreshes the page after clearing
 - Visual feedback with animations: "Clearing..." → "Cleared!" or "Failed"
 
