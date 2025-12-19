@@ -52,12 +52,14 @@ export default function Apps(props) {
   // Export override URLs
   const handleExportOverrides = () => {
     try {
-      // Export only appname and url from savedOverrides
+      // Export all apps with their URLs (or empty string if no URL)
       const tempData = {};
-      Object.entries(importMaps.savedOverrides).forEach(([appName, config]) => {
-        if (config.url) {
-          tempData[appName] = config.url;
-        }
+      
+      // Include all apps from props.apps
+      props.apps.forEach(app => {
+        const savedConfig = importMaps.savedOverrides[app.name];
+        // Use saved URL if exists, otherwise empty string
+        tempData[app.name] = savedConfig?.url || '';
       });
 
       // Sort by appName alphabetically
@@ -75,12 +77,19 @@ export default function Apps(props) {
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = 'single-spa-override-urls.json';
+      link.download = 'exported single-spa overrides.json';
       link.click();
       URL.revokeObjectURL(url);
       
+      // Count apps with URLs
+      const appsWithUrls = Object.values(exportData).filter(url => url.trim()).length;
+      const totalApps = Object.keys(exportData).length;
+      
       // Show success message
-      setImportExportMessage({ type: 'success', text: `Successfully exported ${Object.keys(exportData).length} app(s)` });
+      setImportExportMessage({ 
+        type: 'success', 
+        text: `Successfully exported ${totalApps} app(s) (${appsWithUrls} with URLs)` 
+      });
       setTimeout(() => setImportExportMessage(null), 5000);
     } catch (err) {
       console.error('Error exporting overrides:', err);
@@ -121,11 +130,17 @@ export default function Apps(props) {
 
         // Save imported data to savedOverrides with enabled set to false
         const newSavedOverrides = {};
-        const skippedApps = [];  // Track skipped apps
+        const skippedApps = [];  // Track skipped apps (invalid types or empty URLs)
         
         Object.entries(importedData).forEach(([appName, url]) => {
-          // Validate URL is string and not empty
-          if (typeof url !== 'string' || !url.trim()) {
+          // Validate URL is string - skip non-strings and track them
+          if (typeof url !== 'string') {
+            skippedApps.push(appName);
+            return;
+          }
+          
+          // Skip empty URLs (don't import them) and track them
+          if (!url.trim()) {
             skippedApps.push(appName);
             return;
           }
@@ -136,9 +151,9 @@ export default function Apps(props) {
           };
         });
 
-        // If all apps were skipped
+        // If all apps were skipped (invalid types or empty URLs)
         if (Object.keys(newSavedOverrides).length === 0) {
-          setImportExportMessage({ type: 'error', text: 'Import failed: All URLs are empty' });
+          setImportExportMessage({ type: 'error', text: 'Import failed: No valid URLs found' });
           setTimeout(() => setImportExportMessage(null), 5000);
           return;
         }
@@ -163,10 +178,12 @@ export default function Apps(props) {
         
         // Show import result
         const successCount = Object.keys(newSavedOverrides).length;
-        let message = `Successfully imported ${successCount} app(s)`;
+        const totalApps = Object.keys(importedData).length;
+        const skippedCount = skippedApps.length;
         
-        if (skippedApps.length > 0) {
-          message += `, skipped ${skippedApps.length} empty URL(s)`;
+        let message = `Successfully imported ${successCount} app(s)`;
+        if (skippedCount > 0) {
+          message += ` (${skippedCount} invalid/empty URL(s) ignored)`;
         }
         
         setImportExportMessage({ type: 'success', text: message });
@@ -303,7 +320,6 @@ export default function Apps(props) {
               <Button 
                 className="export-btn"
                 onClick={handleExportOverrides}
-                disabled={Object.keys(importMaps.savedOverrides).length === 0}
               >
                 Export
               </Button>
@@ -639,7 +655,7 @@ body.dark & .app-name {
 & .override-import-export {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 2px;
   margin-left: 0;
   white-space: nowrap;
   flex-wrap: nowrap;
@@ -669,16 +685,10 @@ body.dark & .app-name {
   margin-left: 0;
 }
 
-& .export-btn:hover:not(:disabled),
+& .export-btn:hover,
 & .import-btn:hover {
   background-color: var(--blue-dark);
   outline: none;
-}
-
-& .export-btn:disabled {
-  background-color: var(--gray);
-  cursor: not-allowed;
-  opacity: 0.6;
 }
 
 & .override-message {
@@ -710,6 +720,7 @@ body.dark & .app-name {
   padding-left: .25rem;
   text-align: left;
   white-space: nowrap;
+  line-height: 1.2;
 }
 
 & [role="row"] {
@@ -885,6 +896,7 @@ body.dark & .app-name {
   display: flex;
   align-items: center;
   gap: 12px;
+  vertical-align: middle;
 }
 
 & .reset-all-btn {
@@ -892,6 +904,10 @@ body.dark & .app-name {
   color: #fff;
   font-size: .7rem;
   padding: .2rem .5rem;
+  line-height: 1.2;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
 }
 
 & .reset-all-btn:hover {
@@ -908,6 +924,7 @@ body.dark & .app-name {
   color: var(--pink);
   font-size: .75rem;
   font-weight: normal;
+  line-height: 1.2;
 }
 
 & .reset-confirm-btn {
@@ -915,6 +932,10 @@ body.dark & .app-name {
   color: #fff;
   font-size: .7rem;
   padding: .2rem .5rem;
+  line-height: 1.2;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
 }
 
 & .reset-confirm-btn:hover {
@@ -926,6 +947,10 @@ body.dark & .app-name {
   color: #fff;
   font-size: .7rem;
   padding: .2rem .5rem;
+  line-height: 1.2;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
 }
 
 & .reset-cancel-btn:hover {

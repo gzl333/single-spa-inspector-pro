@@ -24,8 +24,8 @@
 | **Edit Button** | Enter edit mode to modify URL |
 | **Save & Refresh** | Save URL and refresh page (in edit mode) |
 | **Cancel** | Cancel editing (in edit mode) |
-| **Export Button** (v3.2.0) | Export all saved overrides to JSON file (alphabetically sorted) |
-| **Import Button** (v3.2.0) | Import overrides from JSON file with validation |
+| **Export Button** (v3.2.0) | Export all apps to JSON file (apps with URLs + apps without URLs as empty strings, alphabetically sorted) |
+| **Import Button** (v3.2.0) | Import overrides from JSON file with validation (empty URLs are ignored) |
 | **Sort by** (v3.2.0) | Toggle between AppName (A-Z) and Status sorting |
 
 **Workflow:**
@@ -33,8 +33,8 @@
 2. Enter override URL → Click **Save & Refresh**
 3. URL is saved, page refreshes, toggle turns ON
 4. Use **Toggle** to quickly switch override on/off without re-entering URL
-5. **Export** all saved overrides to `single-spa-override-urls.json`
-6. **Import** from JSON file to batch configure overrides (disabled by default)
+5. **Export** all apps to `exported single-spa overrides.json` (includes apps without URLs as empty strings)
+6. **Import** from JSON file to batch configure overrides (empty URLs are ignored, disabled by default)
 
 **Storage:** Override URLs are persisted in `browser.storage.local`, surviving browser restarts.
 
