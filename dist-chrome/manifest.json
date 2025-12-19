@@ -17,8 +17,15 @@
     "128": "./logo-white-bgblue.png"
   },
   "devtools_page": "./build/main.html",
-  "permissions": ["storage", "scripting", "browsingData", "tabs"],
-  "host_permissions": ["<all_urls>"],
+  "permissions": [
+    "storage",
+    "scripting",
+    "browsingData",
+    "tabs"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
